@@ -41,13 +41,13 @@ pub struct PageTableEntry {
 pub enum TranslateResult {
     /// 翻译成功，得到物理地址
     Ok(u32),
-    /// 缺页：虚拟页未映射
+    /// 缺页：虚拟页未映射，或映射无法产生有效的物理地址
     PageFault,
     /// 权限错误：尝试写入只读页
     PermissionDenied,
 }
 
-/// 单级页表，最多支持 `MAX_PAGES` 个虚拟页。
+/// 单级页表，容量由构造时的 `max_pages` 指定。
 pub struct SingleLevelPageTable {
     entries: Vec<Option<PageTableEntry>>,
 }
@@ -62,22 +62,23 @@ impl SingleLevelPageTable {
 
     /// 将虚拟页号 `vpn` 映射到物理页号 `ppn`，并设置标志位 `flags`。
     ///
-    /// 提示：在 `entries[vpn]` 处存放一个 `PageTableEntry`。
+    /// 超出页表范围的虚拟页号会被忽略。
     pub fn map(&mut self, vpn: usize, ppn: u32, flags: u8) {
-        // TODO: 在页表中建立 vpn -> ppn 的映射
-        todo!()
+        if let Some(entry) = self.entries.get_mut(vpn) {
+            *entry = Some(PageTableEntry { ppn, flags });
+        }
     }
 
-    /// 取消虚拟页号 `vpn` 的映射。
+    /// 取消虚拟页号 `vpn` 的映射。超出页表范围时直接返回。
     pub fn unmap(&mut self, vpn: usize) {
-        // TODO: 将 entries[vpn] 设为 None
-        todo!()
+        if let Some(entry) = self.entries.get_mut(vpn) {
+            *entry = None;
+        }
     }
 
     /// 查询虚拟页号 `vpn` 对应的页表项。
     pub fn lookup(&self, vpn: usize) -> Option<&PageTableEntry> {
-        // TODO: 返回 entries[vpn] 的引用（如果存在）
-        todo!()
+        self.entries.get(vpn).and_then(Option::as_ref)
     }
 
     /// 将虚拟地址翻译为物理地址。
@@ -87,13 +88,18 @@ impl SingleLevelPageTable {
     /// 2. 用 VPN 查页表，如果未映射返回 PageFault
     /// 3. 检查 PTE_VALID 标志，未置位返回 PageFault
     /// 4. 如果 `is_write` 为 true，检查 PTE_WRITE 标志
-    /// 5. 计算物理地址 = ppn * PAGE_SIZE + offset
+    /// 5. 计算物理地址 = ppn * PAGE_SIZE + offset，超出 32 位地址范围时返回 PageFault
     pub fn translate(&self, va: u32, is_write: bool) -> TranslateResult {
-        // TODO: 实现虚拟地址到物理地址的翻译
-        // 提示：
-        //   let vpn = (va >> PAGE_OFFSET_BITS) as usize;
-        //   let offset = va & ((1 << PAGE_OFFSET_BITS) - 1);
-        todo!()
+        let Some(entry) = self.lookup(va_to_vpn(va)) else {
+            return TranslateResult::PageFault;
+        };
+        if entry.flags & PTE_VALID == 0 || entry.ppn > (u32::MAX >> PAGE_OFFSET_BITS) {
+            return TranslateResult::PageFault;
+        }
+        if is_write && entry.flags & PTE_WRITE == 0 {
+            return TranslateResult::PermissionDenied;
+        }
+        TranslateResult::Ok(make_pa(entry.ppn, va_to_offset(va)))
     }
 }
 
@@ -101,22 +107,23 @@ impl SingleLevelPageTable {
 ///
 /// 提示：右移 PAGE_OFFSET_BITS 位。
 pub fn va_to_vpn(va: u32) -> usize {
-    // TODO
-    todo!()
+    (va >> PAGE_OFFSET_BITS) as usize
 }
 
 /// 从虚拟地址中提取页内偏移。
 ///
 /// 提示：用掩码提取低 PAGE_OFFSET_BITS 位。
 pub fn va_to_offset(va: u32) -> u32 {
-    // TODO
-    todo!()
+    va & (PAGE_SIZE as u32 - 1)
 }
 
 /// 由物理页号和偏移量拼出物理地址。
+///
+/// 如果结果超出 32 位地址范围，则触发 panic。
 pub fn make_pa(ppn: u32, offset: u32) -> u32 {
-    // TODO
-    todo!()
+    let address = u64::from(ppn) * PAGE_SIZE as u64 + u64::from(offset);
+    assert!(address <= u64::from(u32::MAX), "physical address exceeds 32 bits");
+    address as u32
 }
 
 #[cfg(test)]
